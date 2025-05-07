@@ -1,0 +1,31 @@
+<component name="ArtifactManager">
+  <artifact type="exploded-war" name="testWeb:Web exploded">
+    <output-path>$PROJECT_DIR$/out/artifacts/testWeb_Web_exploded</output-path>
+    <root id="root">
+      <element id="javaee-facet-resources" facet="testWeb/web/Web" />
+      <element id="directory" name="WEB-INF">
+        <element id="directory" name="classes">
+          <element id="module-output" name="testWeb" />
+        </element>
+        <element id="directory" name="lib">
+          <element id="file-copy" path="$PROJECT_DIR$/lib/javax.ejb.jar" />
+          <element id="file-copy" path="$PROJECT_DIR$/lib/javax.jms.jar" />
+          <element id="file-copy" path="$PROJECT_DIR$/lib/javax.servlet.jar" />
+          <element id="file-copy" path="$PROJECT_DIR$/lib/javax.resource.jar" />
+          <element id="file-copy" path="$PROJECT_DIR$/lib/javax.annotation.jar" />
+          <element id="file-copy" path="$PROJECT_DIR$/lib/javax.persistence.jar" />
+          <element id="file-copy" path="$PROJECT_DIR$/lib/javax.servlet.jsp.jar" />
+          <element id="file-copy" path="$PROJECT_DIR$/lib/javax.transaction.jar" />
+          <element id="file-copy" path="$PROJECT_DIR$/lib/javax.servlet.jsp.jstl.jar" />
+          <element id="file-copy" path="$PROJECT_DIR$/lib/mysql-connector-j-8.0.32.jar" />
+          <element id="file-copy" path="$PROJECT_DIR$/lib/Thymeleaf/ognl-3.1.26.jar" />
+          <element id="file-copy" path="$PROJECT_DIR$/lib/Thymeleaf/slf4j-api-1.7.32.jar" />
+          <element id="file-copy" path="$PROJECT_DIR$/lib/Thymeleaf/javassist-3.24.1-GA.jar" />
+          <element id="file-copy" path="$PROJECT_DIR$/lib/Thymeleaf/unbescape-1.1.6.RELEASE.jar" />
+          <element id="file-copy" path="$PROJECT_DIR$/lib/Thymeleaf/attoparser-2.0.5.RELEASE.jar" />
+          <element id="file-copy" path="$PROJECT_DIR$/lib/Thymeleaf/thymeleaf-3.0.15.RELEASE.jar" />
+        </element>
+      </element>
+    </root>
+  </artifact>
+</component>

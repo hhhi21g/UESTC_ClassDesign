@@ -1,0 +1,26 @@
+<!-- index.html -->
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>My Memos</title>
+</head>
+<body>
+<h2>📝 我的备忘录</h2>
+<form method="post" action="http://localhost:9090/upload">
+    <input type="text" name="note" placeholder="写点什么..." required="required">
+    <input type="submit" value="添加">
+</form>
+<table>
+    <tr th:each="f:${allContents}">
+        <td th:text="${f}"></td>
+        <td>
+        <form method="post" action="http://localhost:9090/delete">
+            <input type="hidden" name="note" th:value="${f}">
+            <button type="submit">点击删除</button>
+        </form>
+        </td>
+    </tr>
+</table>
+</body>
+</html>
