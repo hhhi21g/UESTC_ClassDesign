@@ -64,4 +64,10 @@ public class viewBaseServlet extends HttpServlet{
         // 3.处理模板数据
         templateEngine.process(templateName, webContext, resp.getWriter());
     }
+
+    public TemplateEngine getTemplateEngine() {
+        return this.templateEngine;
+    }
 }
+
+
