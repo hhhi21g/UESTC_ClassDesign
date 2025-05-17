@@ -24,6 +24,8 @@ int merror(SOCKET redata, SOCKET error, const char *showinfo)
 int main()
 {
     printf("Web Server started...\n");
+    load_cookie();
+
     WSAData wsdata;
     int isok = WSAStartup(MAKEWORD(2, 2), &wsdata);
     merror(isok, WSAEINVAL, "ask socket fail");
@@ -48,6 +50,12 @@ int main()
     {
         SOCKET client = accept(server, (struct sockaddr *)&client_addr, &client_len);
         merror(client, INVALID_SOCKET, "accept fail");
+
+        if (client == INVALID_SOCKET)
+        {
+            printf("accept fail: %d\n", WSAGetLastError());
+            continue;
+        }
 
         pthread_t tid;
         SOCKET *pclient = (SOCKET *)malloc(sizeof(SOCKET));
@@ -142,10 +150,12 @@ void load_cookie()
     if (fp)
     {
         fgets(saved_cookie, sizeof(saved_cookie), fp);
+        // 清除末尾的 \r 或 \n
+        saved_cookie[strcspn(saved_cookie, "\r\n")] = 0;
         fclose(fp);
-        // printf("📂 已加载 Cookie: %s\n", saved_cookie);
     }
 }
+
 
 // 保存 cookie 到文件
 void save_cookie(const char *cookie_value)
@@ -191,7 +201,7 @@ void forward_to_backend(SOCKET client_sock, const char *original_request, int to
 
     // 构建新的请求路径（加上 /webTest）
     char request_line[256];
-    if (strcmp(path, "/upload") == 0 || strcmp(path, "/delete") == 0 || strcmp(path, "/memos") == 0)
+    if (strcmp(path, "/upload") == 0 || strcmp(path, "/delete") == 0 || strcmp(path, "/memos") == 0 || strcmp(path, "/update") == 0)
         sprintf(request_line, "%s /webTest%s HTTP/1.1\r\n", method, path);
     else
         sprintf(request_line, "%s %s HTTP/1.1\r\n", method, path);
@@ -215,21 +225,27 @@ void forward_to_backend(SOCKET client_sock, const char *original_request, int to
     memcpy(body, header_end + 4, body_len);
 
     // 处理 headers（去除 Host / Content-Length / Cookie / Accept-Encoding）
+   // 遍历 headers（不破坏原始数据）
     char cleaned_headers[4096] = "";
-    char *line = strtok(headers, "\r\n");
-    while (line)
-    {
+    const char *header_ptr = header_start;
+    while (header_ptr < header_start + header_len) {
+        const char *line_end = strstr(header_ptr, "\r\n");
+        if (!line_end) break;
+
+        int line_len = line_end - header_ptr;
+        char line[1024] = "";
+        strncpy(line, header_ptr, line_len);
+        line[line_len] = '\0';
+
         if (strstr(line, "Host:") || strstr(line, "Content-Length:") ||
-            strstr(line, "Cookie:") || strstr(line, "Accept-Encoding:"))
-        {
+            strstr(line, "Cookie:") || strstr(line, "Accept-Encoding:")) {
             // 跳过这些字段
-        }
-        else
-        {
+        } else {
             strcat(cleaned_headers, line);
             strcat(cleaned_headers, "\r\n");
         }
-        line = strtok(NULL, "\r\n");
+
+        header_ptr = line_end + 2; // 移动到下一行
     }
 
     // 添加必要头部
@@ -264,7 +280,13 @@ void forward_to_backend(SOCKET client_sock, const char *original_request, int to
     new_len += body_len;
 
     printf("📤 转发内容如下：\n%.*s\n", new_len, modified_request);
-    send(backend_sock, modified_request, new_len, 0);
+    int sent = send(backend_sock, modified_request, new_len, 0);
+    if (sent < 0)
+    {
+        send_error(client_sock, "500 Internal Server Error");
+        closesocket(backend_sock);
+        return;
+    }
 
     // 转发响应并提取 Cookie
     char response_buffer[8192];
@@ -281,9 +303,6 @@ void forward_to_backend(SOCKET client_sock, const char *original_request, int to
                 char *jsid_end = strchr(jsid_start, ';');
                 if (jsid_end)
                     *jsid_end = '\0';
-                // strncpy(saved_cookie, jsid_start, sizeof(saved_cookie) - 1);
-                // saved_cookie[sizeof(saved_cookie) - 1] = '\0';
-                // printf("✅ 已保存 Cookie: %s\n", saved_cookie);
                 save_cookie(jsid_start);
             }
         }

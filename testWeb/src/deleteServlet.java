@@ -16,6 +16,11 @@ public class deleteServlet extends viewBaseServlet {
         req.setCharacterEncoding("utf-8");
         resp.setCharacterEncoding("utf-8");
         resp.setContentType("text/html;charset=UTF-8");
+        System.out.println("/upload");
+        System.out.println("当前Session ID:"+session.getId());
+        System.out.println("当前备忘录列表："+session.getAttribute("allContents"));
+        System.out.println("请求Cookie:"+req.getHeader("Cookie"));
+        System.out.println("*********************************************");
 
         String content = req.getParameter("note");
         System.out.println(content);

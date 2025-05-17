@@ -1,4 +1,3 @@
-<!-- index.html -->
 <!DOCTYPE html>
 <html>
 <head>
@@ -6,25 +5,57 @@
     <title>My Memos</title>
 </head>
 <body>
-<h2>📝 我的备忘录</h2>
+<h2>📝 我的备忘录Test</h2>
+
+<!-- 添加 -->
 <form method="post" action="http://localhost:9090/upload">
     <input type="text" name="note" placeholder="写点什么..." required="required">
     <input type="submit" value="添加">
 </form>
+
+<!-- 备忘录表格 -->
 <table>
-    <tr th:each="f:${allContents}">
+    <tr th:each="f : ${allContents}">
         <td th:text="${f}"></td>
         <td>
-        <form method="post" action="http://localhost:9090/delete">
-            <input type="hidden" name="note" th:value="${f}">
-            <button type="submit">点击删除</button>
-        </form>
+            <!-- 删除 -->
+            <form method="post" action="http://localhost:9090/delete">
+                <input type="hidden" name="note" th:value="${f}">
+                <button type="submit">点击删除</button>
+            </form>
+            <!-- 修改（PUT） -->
+            <button type="button" onclick="sendPut(this.dataset.old)" data-old="a">PUT请求</button>
         </td>
     </tr>
 </table>
+
+<!-- 查看所有（GET） -->
 <hr>
-<form method="get" action="https://localhost:9090/memos">
-    <button type="submit">查看所有备忘录(GET)</button>
+<form method="get" action="http://localhost:9090/memos" onsubmit="event.preventDefault(); window.location.href=this.action;">
+    <button type="button" onclick="sendPut(this.dataset.old)" data-old="a">PUT请求</button>
 </form>
+
+<!-- JavaScript：处理 PUT 请求 -->
+<script>
+    function sendPut(oldValue) {
+        const note = prompt("请输入修改内容", oldValue);
+        if (note) {
+            fetch("http://localhost:9090/update", {
+                method: "PUT",
+                headers: {
+                    "Content-Type": "application/x-www-form-urlencoded"
+                },
+                body: "old=" + encodeURIComponent(oldValue) + "&note=" + encodeURIComponent(note)
+            })
+                .then(res => res.text())
+                .then(msg => {
+                    alert("✅ 修改成功！");
+                    location.reload();
+                });
+        }
+    }
+</script>
+
+
 </body>
 </html>
