@@ -3,59 +3,134 @@
 <head>
     <meta charset="UTF-8">
     <title>My Memos</title>
+    <style>
+        table { border-collapse: collapse; width: 60%; }
+        td, th { border: 1px solid #ddd; padding: 8px; }
+        button, input[type="submit"] {
+            padding: 5px 10px; margin: 2px; border-radius: 4px; border: 1px solid #888; cursor: pointer;
+        }
+        form { display: inline; margin: 0; }
+    </style>
 </head>
 <body>
 <h2>📝 我的备忘录Test</h2>
 
 <!-- 添加 -->
-<form method="post" action="http://localhost:9090/upload">
-    <input type="text" name="note" placeholder="写点什么..." required="required">
+<form id="addForm" method="post" action="http://212.129.223.4:9090/webTest/upload" style="margin-bottom: 20px;" autocomplete="off">
+    <input type="text" name="note" placeholder="写点什么..." required>
     <input type="submit" value="添加">
 </form>
 
 <!-- 备忘录表格 -->
 <table>
+    <tr>
+        <th>内容</th>
+        <th>删除</th>
+        <th>修改</th>
+    </tr>
     <tr th:each="f : ${allContents}">
         <td th:text="${f}"></td>
         <td>
-            <!-- 删除 -->
-            <form method="post" action="http://localhost:9090/delete">
-                <input type="hidden" name="note" th:value="${f}">
-                <button type="submit">点击删除</button>
-            </form>
-            <!-- 修改（PUT） -->
-            <button type="button" onclick="sendPut(this.dataset.old)" data-old="a">PUT请求</button>
+            <button type="button" th:data-note="${f}" onclick="sentPutFromDom(this)">
+                删除
+            </button>
+        </td>
+
+        <td>
+            <button type="button"
+                    th:onclick="'sendPut(this.dataset.old, event)'"
+                    th:data-old="${f}">
+                修改
+            </button>
         </td>
     </tr>
 </table>
 
-<!-- 查看所有（GET） -->
 <hr>
-<form method="get" action="http://localhost:9090/memos" onsubmit="event.preventDefault(); window.location.href=this.action;">
-    <button type="button" onclick="sendPut(this.dataset.old)" data-old="a">PUT请求</button>
-</form>
+<a href="http://212.129.223.4:9090/webTest/memos">GET请求</a>
 
 <!-- JavaScript：处理 PUT 请求 -->
 <script>
-    function sendPut(oldValue) {
-        const note = prompt("请输入修改内容", oldValue);
-        if (note) {
-            fetch("http://localhost:9090/update", {
+    function sendPut(oldValue, event) {
+        if (event) {
+            event.preventDefault();
+            event.stopPropagation();
+        }
+        const note = prompt("✏️ 请输入修改内容", oldValue);
+        if (note && note !== oldValue) {
+            fetch("http://212.129.223.4:9090/webTest/update", {
                 method: "PUT",
+                credentials: "include",
                 headers: {
                     "Content-Type": "application/x-www-form-urlencoded"
                 },
                 body: "old=" + encodeURIComponent(oldValue) + "&note=" + encodeURIComponent(note)
             })
-                .then(res => res.text())
-                .then(msg => {
-                    alert("✅ 修改成功！");
-                    location.reload();
+                .then(res => {
+                    document.querySelector('input[name="note"]').value = "";
+                    if (res.ok) {
+                        window.location.reload(true);
+                    } else {
+                        alert("❌ 修改失败！");
+                    }
+                })
+                .catch(() => {
+                    alert("❌ 修改失败！");
                 });
         }
     }
 </script>
+<script>
+    document.getElementById('addForm').onsubmit = function(e) {
+        e.preventDefault();
+        // 这里用 fetch/ajax 手动添加内容
+        let val = document.querySelector('input[name="note"]').value.trim();
+        if(val){
+            fetch("http://212.129.223.4:9090/webTest/upload", {
+                method: "POST",
+                credentials: "include",
+                headers: {"Content-Type": "application/x-www-form-urlencoded"},
+                body: "note=" + encodeURIComponent(val)
+            })
+                .then(res => {
+                    if (res.ok) {
+                        document.querySelector('input[name="note"]').value = ""; // 清空输入框
+                        window.location.href = "/webTest/?t=" + Date.now(); // 防止缓存
+                    } else {
+                        alert("添加失败，服务端状态码：" + res.status);
+                    }
+                })
+                .catch((err) => {
+                    alert("添加失败，网络异常");
+                    console.error(err);
+                })
+        } else {
+            alert("内容不能为空！");
+        }
+    };
+</script>
+<script>
+    function sentPutFromDom(btn) {
+        const note = btn.dataset.note;
+        sendDelete(note);
+    }
 
+    function sendDelete(note) {
+        if(!confirm("确定要删除吗？")) return;
+        fetch("http://212.129.223.4:9090/webTest/delete?note=" + encodeURIComponent(note), {
+            method: "DELETE",
+            credentials: "include"
+        })
+            .then(res => {
+                if(res.ok) {
+                    window.location.href = "/webTest/?t=" + Date.now(); // 强制刷新
+                } else {
+                    alert("❌ 删除失败！");
+                }
+            })
+        // .catch(() => alert("❌ 删除失败！"));
+    }
 
+</script>
 </body>
 </html>

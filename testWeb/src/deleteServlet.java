@@ -11,27 +11,36 @@ import java.util.List;
 @WebServlet("/delete")
 public class deleteServlet extends viewBaseServlet {
     @Override
-    protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
+    protected void doDelete(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
         HttpSession session = req.getSession();
         req.setCharacterEncoding("utf-8");
         resp.setCharacterEncoding("utf-8");
         resp.setContentType("text/html;charset=UTF-8");
-        System.out.println("/upload");
+        resp.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+        resp.setHeader("Pragma", "no-cache");
+        resp.setHeader("Expires", "0");
+        resp.setHeader("Access-Control-Allow-Origin", "http://212.129.223.4:8080");
+        resp.setHeader("Access-Control-Allow-Credentials", "true");
+        resp.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
+        resp.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
+
+
+        System.out.println("/delete");
         System.out.println("当前Session ID:"+session.getId());
         System.out.println("当前备忘录列表："+session.getAttribute("allContents"));
         System.out.println("请求Cookie:"+req.getHeader("Cookie"));
         System.out.println("*********************************************");
 
-        String content = req.getParameter("note");
-        System.out.println(content);
-
         List<String> allContents = (List<String>) session.getAttribute("allContents");
-
-        if (allContents != null && content != null) {
-            allContents.remove(content); // 删除指定内容
+        String note = req.getParameter("note");
+        if (allContents != null && note != null) {
+            allContents.remove(note);
             session.setAttribute("allContents", allContents);
-            req.setAttribute("allContents",allContents);
+            resp.getWriter().write("ok");
+        } else {
+            resp.setStatus(400);
+            resp.getWriter().write("删除失败");
         }
-        super.processTemplate("index",req,resp);
     }
 }

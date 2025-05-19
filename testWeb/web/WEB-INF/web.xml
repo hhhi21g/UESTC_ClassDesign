@@ -11,4 +11,7 @@
         <param-name>viewsuffix</param-name>
         <param-value>.html</param-value>
     </context-param>
+    <welcome-file-list>
+        <welcome-file>webTest/</welcome-file>
+    </welcome-file-list>
 </web-app>
