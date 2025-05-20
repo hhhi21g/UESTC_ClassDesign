@@ -152,7 +152,7 @@
         })
             .then(res => {
                 let result = [...res.headers.entries()].map(([k,v]) => `${k}: ${v}`).join('\n');
-                showResult("✅ OPTIONS 响应头：", result);
+                showResult("OPTIONS 响应：", result);
             })
             .catch(err => showResult("❌ OPTIONS 失败", err));
     }
@@ -164,7 +164,7 @@
             .then(res => {
                 let statusLine = `Status: ${res.status} ${res.statusText}`;
                 let result = [...res.headers.entries()].map(([k,v]) => `${k}: ${v}`).join('\n');
-                showResult("✅ OPTIONS 响应头：\n" + statusLine, result);
+                showResult("HEAD 响应：\n" + statusLine, result);
             })
             .catch(err => showResult("❌ HEAD 失败", err));
     }
@@ -177,7 +177,7 @@
             .then(text => {
                 showResult("✅ TRACE 响应：", text);
             })
-            .catch(err => showResult("⚠️ TRACE 失败, 请使用 curl -v -X TRACE http://212.129.223.4:9090/webTest/memos\n", err));
+            .catch(err => showResult("⚠️ TRACE 请求无法通过浏览器测试, 请使用 curl:\n\n curl -v -X TRACE http://212.129.223.4:9090/webTest/memos\n", err));
     }
 
     function testCONNECT() {
