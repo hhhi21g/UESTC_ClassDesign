@@ -13,11 +13,11 @@
     </style>
 </head>
 <body>
-<h2>📝 我的备忘录Test</h2>
+<h2>📝 备忘录Test</h2>
 
 <!-- 添加 -->
 <form id="addForm" method="post" action="http://212.129.223.4:9090/webTest/upload" style="margin-bottom: 20px;" autocomplete="off">
-    <input type="text" name="note" placeholder="写点什么..." required>
+    <input type="text" name="note" placeholder="写点什么...(POST)" required>
     <input type="submit" value="添加">
 </form>
 
@@ -32,7 +32,7 @@
         <td th:text="${f}"></td>
         <td>
             <button type="button" th:data-note="${f}" onclick="sentPutFromDom(this)">
-                删除
+                删除(DELETE)
             </button>
         </td>
 
@@ -40,14 +40,21 @@
             <button type="button"
                     th:onclick="'sendPut(this.dataset.old, event)'"
                     th:data-old="${f}">
-                修改
+                修改(PUT)
             </button>
         </td>
     </tr>
 </table>
 
+<h3>其余方法测试</h3>
+<button onclick="testOPTIONS()">OPTIONS</button>
+<button onclick="testHEAD()">HEAD</button>
+<button onclick="testTRACE()">TRACE</button>
+<button onclick="testCONNECT()">CONNECT</button>
+<pre id="testResult" style="border:1px solid #aaa;padding:10px;margin-top:10px;"></pre>
+
 <hr>
-<a href="http://212.129.223.4:9090/webTest/memos">GET请求</a>
+<a href="http://212.129.223.4:9090/webTest/memos">返回所有备忘录(GET)</a>
 
 <!-- JavaScript：处理 PUT 请求 -->
 <script>
@@ -132,5 +139,51 @@
     }
 
 </script>
+
+<script>
+    function showResult(title, res) {
+        const pre = document.getElementById('testResult');
+        pre.textContent = title + '\n' + res;
+    }
+
+    function testOPTIONS() {
+        fetch("http://212.129.223.4:9090/webTest/memos", {
+            method: "OPTIONS"
+        })
+            .then(res => {
+                let result = [...res.headers.entries()].map(([k,v]) => `${k}: ${v}`).join('\n');
+                showResult("✅ OPTIONS 响应头：", result);
+            })
+            .catch(err => showResult("❌ OPTIONS 失败", err));
+    }
+
+    function testHEAD() {
+        fetch("http://212.129.223.4:9090/webTest/memos", {
+            method: "HEAD"
+        })
+            .then(res => {
+                let statusLine = `Status: ${res.status} ${res.statusText}`;
+                let result = [...res.headers.entries()].map(([k,v]) => `${k}: ${v}`).join('\n');
+                showResult("✅ OPTIONS 响应头：\n" + statusLine, result);
+            })
+            .catch(err => showResult("❌ HEAD 失败", err));
+    }
+
+    function testTRACE() {
+        fetch("http://212.129.223.4:9090/webTest/memos", {
+            method: "TRACE"
+        })
+            .then(res => res.text())
+            .then(text => {
+                showResult("✅ TRACE 响应：", text);
+            })
+            .catch(err => showResult("⚠️ TRACE 失败, 请使用 curl -v -X TRACE http://212.129.223.4:9090/webTest/memos\n", err));
+    }
+
+    function testCONNECT() {
+        showResult("⚠️ CONNECT 请求无法通过浏览器测试，请使用 curl：\n\ncurl -v -X CONNECT http://212.129.223.4:9090/webTest/memos", "");
+    }
+</script>
+
 </body>
 </html>

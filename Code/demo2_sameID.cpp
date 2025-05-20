@@ -11,7 +11,11 @@
 
 void *handle_client(void *client_socket);
 void send_error(int s, const char *error_message);
+void handle_preflight_request(int client_sock);
 void forward_to_backend(int client_sock, const char *original_request, int total_len);
+void handle_options_request(int client_sock);
+void handle_trace_request(int client_sock, const char *original_request, int total_len);
+void handle_connect_request(int client_sock);
 
 int merror(int redata, int error, const char *showinfo)
 {
@@ -84,6 +88,27 @@ void *handle_client(void *client_socket)
         return NULL;
     }
 
+    if (strncmp(buffer, "OPTIONS", 7) == 0)
+    {
+        handle_options_request(client);
+        close(client);
+        return NULL;
+    }
+
+    if (strncmp(buffer, "TRACE", 5) == 0)
+    {
+        handle_trace_request(client, buffer, total);
+        close(client);
+        return NULL;
+    }
+
+    if (strncmp(buffer, "CONNECT", 7) == 0)
+    {
+        handle_connect_request(client);
+        close(client);
+        return NULL;
+    }
+
     int content_length = 0;
     char *cl = strstr(buffer, "Content-Length:");
     if (cl != NULL)
@@ -126,6 +151,50 @@ void *handle_client(void *client_socket)
     return NULL;
 }
 
+void handle_options_request(int client_sock)
+{
+    const char *response =
+        "HTTP/1.1 204 No Content\r\n"
+        "Access-Control-Allow-Origin: http://212.129.223.4:8080\r\n"
+        "Access-Control-Allow-Credentials: true\r\n"
+        "Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n"
+        "Access-Control-Allow-Headers: Content-Type\r\n"
+        "Access-Control-Expose-Headers: Access-Control-Allow-Origin, Access-Control-Allow-Methods, Access-Control-Allow-Headers\r\n"
+        "Access-Control-Max-Age: 86400\r\n"
+        "\r\n";
+
+    send(client_sock, response, strlen(response), 0);
+}
+
+void handle_trace_request(int client_sock, const char *original_request, int total_len)
+{
+    const char *response_header =
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: message/http\r\n"
+        "Access-Control-Allow-Origin: http://212.129.223.4:8080\r\n"
+        "Access-Control-Allow-Credentials: true\r\n"
+        "\r\n";
+
+    // 先发送响应头
+    send(client_sock, response_header, strlen(response_header), 0);
+
+    // 然后原样回显客户端请求内容
+    send(client_sock, original_request, total_len, 0);
+}
+
+void handle_connect_request(int client_sock)
+{
+    const char *response =
+        "HTTP/1.1 200 Connection Established\r\n"
+        "Access-Control-Allow-Origin: http://212.129.223.4:8080\r\n"
+        "Access-Control-Allow-Credentials: true\r\n"
+        "Content-Type: text/plain\r\n"
+        "\r\n"
+        "CONNECT 方法已收到并已响应（此为课程设计模拟响应）\r\n";
+
+    send(client_sock, response, strlen(response), 0);
+}
+
 void send_error(int s, const char *error_message)
 {
     char response[1024];
@@ -137,6 +206,23 @@ void send_error(int s, const char *error_message)
 
 void forward_to_backend(int client_sock, const char *original_request, int total_len)
 {
+    // 检查是否为 OPTIONS 请求
+    if (strncmp(original_request, "OPTIONS", 7) == 0)
+    {
+        handle_options_request(client_sock);
+        return;
+    }
+    if (strncmp(original_request, "TRACE", 5) == 0)
+    {
+        handle_trace_request(client_sock, original_request, total_len);
+        return;
+    }
+    if (strncmp(original_request, "CONNECT", 7) == 0)
+    {
+        handle_connect_request(client_sock);
+        return;
+    }
+
     int backend_sock = socket(AF_INET, SOCK_STREAM, 0);
     struct sockaddr_in backend_addr;
     backend_addr.sin_family = AF_INET;
@@ -150,7 +236,7 @@ void forward_to_backend(int client_sock, const char *original_request, int total
         close(backend_sock);
         return;
     }
-    // 解析请求行
+
     char method[8], path[1024];
     sscanf(original_request, "%s %s", method, path);
 
@@ -162,21 +248,25 @@ void forward_to_backend(int client_sock, const char *original_request, int total
         return;
     }
 
-    // 构建新的请求路径（加上 /webTest）
-    char request_line[256];
+    char request_line[2048];
+    if (strncmp(path, "http://", 7) == 0 || strncmp(path, "https://", 8) == 0)
+    {
+        char *p = strstr(path + (path[4] == 's' ? 8 : 7), "/");
+        if (p)
+            strcpy(path, p);
+    }
     if (strncmp(path, "/webTest", 8) == 0)
-        sprintf(request_line, "%s %s HTTP/1.1\r\n", method, path);
+        snprintf(request_line, sizeof(request_line), "%s %s HTTP/1.1\r\n", method, path);
     else if (strcmp(path, "/upload") == 0 || strcmp(path, "/delete") == 0 || strcmp(path, "/memos") == 0 || strcmp(path, "/update") == 0)
-        sprintf(request_line, "%s /webTest%s HTTP/1.1\r\n", method, path);
+        snprintf(request_line, sizeof(request_line), "%s /webTest%s HTTP/1.1\r\n", method, path);
     else
-        sprintf(request_line, "%s %s HTTP/1.1\r\n", method, path);
+        snprintf(request_line, sizeof(request_line), "%s %s HTTP/1.1\r\n", method, path);
 
-    // 分离 headers 与 body
     const char *header_start = first_line_end + 2;
     const char *header_end = strstr(header_start, "\r\n\r\n");
     if (!header_end)
     {
-        send_error(client_sock, "400 Bad Request");
+        send(client_sock, "HTTP/1.1 400 Bad Request\r\n\r\n", 28, 0);
         close(backend_sock);
         return;
     }
@@ -189,7 +279,6 @@ void forward_to_backend(int client_sock, const char *original_request, int total
     headers[header_len] = '\0';
     memcpy(body, header_end + 4, body_len);
 
-    // 处理 headers（去除 Host / Content-Length / Cookie / Accept-Encoding）
     char cleaned_headers[4096] = "";
     const char *header_ptr = header_start;
     while (header_ptr < header_start + header_len)
@@ -203,25 +292,21 @@ void forward_to_backend(int client_sock, const char *original_request, int total
         strncpy(line, header_ptr, line_len);
         line[line_len] = '\0';
 
-        if (strstr(line, "Host:") || strstr(line, "Content-Length:") ||
-            strstr(line, "Accept-Encoding:"))
+        if (strstr(line, "Host:") || strstr(line, "Content-Length:") || strstr(line, "Accept-Encoding:"))
         {
-            // 跳过这些字段
+            // 跳过
         }
         else
         {
             strcat(cleaned_headers, line);
             strcat(cleaned_headers, "\r\n");
         }
-
-        header_ptr = line_end + 2; // 移动到下一行
+        header_ptr = line_end + 2;
     }
-
-    // 添加必要头部
-    strcat(cleaned_headers, "Host: 212.129.223.4:8080\r\n");
 
     char clen[64];
     sprintf(clen, "Content-Length: %d\r\n", body_len);
+    strcat(cleaned_headers, "Host: 212.129.223.4:8080\r\n");
     strcat(cleaned_headers, clen);
     strcat(cleaned_headers, "Accept-Encoding: identity\r\n");
     strcat(cleaned_headers, "TE: trailers\r\n");
@@ -229,30 +314,21 @@ void forward_to_backend(int client_sock, const char *original_request, int total
     strcat(cleaned_headers, "Referer: http://212.129.223.4:8080/\r\n");
     strcat(cleaned_headers, "Connection: close\r\n");
 
-    // 构造最终请求
     char modified_request[8192];
     int new_len = sprintf(modified_request, "%s%s\r\n", request_line, cleaned_headers);
     memcpy(modified_request + new_len, body, body_len);
     new_len += body_len;
 
     printf("📤 转发内容如下：\n%.*s\n", new_len, modified_request);
-    int sent = send(backend_sock, modified_request, new_len, 0);
-    if (sent < 0)
+    printf("-------------------------------------------------------");
+
+    if (send(backend_sock, modified_request, new_len, 0) < 0)
     {
-        send_error(client_sock, "500 Internal Server Error");
+        send(client_sock, "HTTP/1.1 500 Internal Server Error\r\n\r\n", 38, 0);
         close(backend_sock);
         return;
     }
-    printf("----C拼接后完整HTTP请求（十六进制）----\n");
-    for (int i = 0; i < new_len; i++)
-    {
-        printf("%02X ", (unsigned char)modified_request[i]);
-        if (i % 16 == 15)
-            printf("\n");
-    }
-    printf("\n----------------------------\n");
 
-    // -------- 下面是核心改动：插入 CORS 响应头 --------
     int first_packet = 1;
     char response_buffer[8192];
     int bytes;
@@ -260,33 +336,48 @@ void forward_to_backend(int client_sock, const char *original_request, int total
     {
         if (first_packet)
         {
-            // 找到响应头结束
             char *header_end = strstr(response_buffer, "\r\n\r\n");
             if (header_end)
             {
                 int head_len = header_end - response_buffer;
-                char new_response[9000];
-                memcpy(new_response, response_buffer, head_len);
-                int pos = head_len;
+                char original_headers[8192] = {0};
+                strncpy(original_headers, response_buffer, head_len);
+
+                // 清理已有 CORS 字段
+                char *line = strtok(original_headers, "\r\n");
+                char final_headers[8192] = {0};
+                while (line != NULL)
+                {
+                    if (!strstr(line, "Access-Control-Allow-Origin") && !strstr(line, "Access-Control-Allow-Credentials"))
+                    {
+                        strcat(final_headers, line);
+                        strcat(final_headers, "\r\n");
+                    }
+                    line = strtok(NULL, "\r\n");
+                }
+
+                char new_response[9000] = {0};
+                int pos = 0;
+                pos += sprintf(new_response + pos, "%s", final_headers);
                 pos += sprintf(new_response + pos,
-                               "\r\nAccess-Control-Allow-Origin: http://212.129.223.4:8080"
-                               "\r\nAccess-Control-Allow-Credentials: true");
-                strcpy(new_response + pos, header_end); // 包括 "\r\n\r\n" 和 body
+                               "Access-Control-Allow-Origin: http://212.129.223.4:8080\r\n"
+                               "Access-Control-Allow-Credentials: true\r\n\r\n");
+                strcpy(new_response + pos, header_end + 4);
+
                 int total_len = strlen(new_response);
                 send(client_sock, new_response, total_len, 0);
             }
             else
             {
-                // 没找到分界，原样转发
                 send(client_sock, response_buffer, bytes, 0);
             }
             first_packet = 0;
         }
         else
         {
-            // 只转发后续内容
             send(client_sock, response_buffer, bytes, 0);
         }
     }
+
     close(backend_sock);
 }
