@@ -2,20 +2,20 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <pthread.h>     // posix线程库，用于多线程编程
-#include <sys/socket.h>  // 套接字接口定义，提供socket编程的系统调用
-#include <netinet/in.h>  // Internet协议族地址结构，包含sockaddr_in结构体
-#include <arpa/inet.h>   // IP地址转换函数
+#include <pthread.h>    // posix线程库，用于多线程编程
+#include <sys/socket.h> // 套接字接口定义，提供socket编程的系统调用
+#include <netinet/in.h> // Internet协议族地址结构，包含sockaddr_in结构体
+#include <arpa/inet.h>  // IP地址转换函数
+#include <netinet/tcp.h>
 
-#define PORT 9090  // 监听IP地址上的9090端口，等待客户端连接
+#define PORT 9090 // 监听IP地址上的9090端口，等待客户端连接
 
 void *handle_client(void *client_socket);
-void send_error(int s, const char *error_message);
+void send_error(int client_sock, const char *status_code, const char *message);
 void forward_to_backend(int client_sock, const char *original_request, int total_len);
 void handle_options_request(int client_sock);
 void handle_trace_request(int client_sock, const char *original_request, int total_len);
 void handle_connect_request(int client_sock);
-
 
 // 错误处理函数
 int merror(int redata, int error, const char *showinfo)
@@ -37,10 +37,10 @@ int main()
     merror(server, -1, "create socket fail");
 
     struct sockaddr_in server_addr;
-    server_addr.sin_family = AF_INET;           // IPv4协议，与套接字相同
-    server_addr.sin_port = htons(PORT);         // 端口号，转为网络字节序
-    server_addr.sin_addr.s_addr = INADDR_ANY;   // 监听所有IP地址上的请求
-    memset(&(server_addr.sin_zero), 0, 8);      // 结构体填充位
+    server_addr.sin_family = AF_INET;         // IPv4协议，与套接字相同
+    server_addr.sin_port = htons(PORT);       // 端口号，主机字节序(通常为小端序)转为网络字节序(大端序)
+    server_addr.sin_addr.s_addr = INADDR_ANY; // 监听所有IP地址上的请求
+    memset(&(server_addr.sin_zero), 0, 8);    // 结构体填充位
 
     int reuse = 1;
     // 设置socket允许端口复用
@@ -77,44 +77,71 @@ int main()
 // 为每个客户端连接单独处理请求
 void *handle_client(void *client_socket)
 {
-    int client = *(int *)client_socket;  // 从线程参数中获取socket文件描述符
+    int client = *(int *)client_socket;
     free(client_socket);
+
     char buffer[8192] = "";
     int total = 0, bytes = 0;
 
-    while ((bytes = recv(client, buffer + total, sizeof(buffer) - total - 1, 0)) > 0)  // recv():读取socket中数据
+    // 接收并判断是否超长
+    while ((bytes = recv(client, buffer + total, sizeof(buffer) - total - 1, 0)) > 0)
     {
         total += bytes;
         buffer[total] = '\0';
-        if (strstr(buffer, "\r\n\r\n"))  // 报文头部结束标志
-            break;
+
+        if (total >= sizeof(buffer) - 1)
+        {
+            fprintf(stderr, "错误：请求超出最大缓冲区\n");
+            send_error(client, "413 Payload Too Large", "请求过长");
+            return NULL;
+        }
+
+        if (strstr(buffer, "\r\n\r\n"))
+            break; // 收到完整 header 就跳出
     }
 
-    // 收不到数据，直接关闭连接返回
-    if (total == 0)  
+    if (total == 0)
     {
         close(client);
         return NULL;
     }
 
+    // 请求格式初步验证
+    if (strstr(buffer, "GET") == NULL &&
+        strstr(buffer, "POST") == NULL &&
+        strstr(buffer, "PUT") == NULL &&
+        strstr(buffer, "DELETE") == NULL &&
+        strstr(buffer, "OPTIONS") == NULL &&
+        strstr(buffer, "HEAD") == NULL &&
+        strstr(buffer, "CONNECT") == NULL &&
+        strstr(buffer, "TRACE") == NULL)
+    {
+        fprintf(stderr, "错误：未检测到有效 HTTP 方法\n");
+        send_error(client, "400 Bad Request", "非法请求格式");
+        return NULL;
+    }
+
+    // PATCH 请求不支持
+    if (strncmp(buffer, "PATCH", 5) == 0)
+    {
+        fprintf(stderr, "错误：收到不支持的 PATCH 方法\n");
+        send_error(client, "405 Method Not Allowed", "不支持的 HTTP 方法");
+        return NULL;
+    }
+
     // 特殊方法处理
-    // 1. OPTIONS
     if (strncmp(buffer, "OPTIONS", 7) == 0)
     {
         handle_options_request(client);
         close(client);
         return NULL;
     }
-
-    // 2. TRACE
     if (strncmp(buffer, "TRACE", 5) == 0)
     {
         handle_trace_request(client, buffer, total);
         close(client);
         return NULL;
     }
-
-    // 3. CONNECT
     if (strncmp(buffer, "CONNECT", 7) == 0)
     {
         handle_connect_request(client);
@@ -122,7 +149,7 @@ void *handle_client(void *client_socket)
         return NULL;
     }
 
-    // 找到请求头中的"Content-Length"字段，读取数值，判断是否需要继续接收数据
+    // 请求体长度检查
     int content_length = 0;
     char *cl = strstr(buffer, "Content-Length:");
     if (cl != NULL)
@@ -130,17 +157,20 @@ void *handle_client(void *client_socket)
         sscanf(cl, "Content-Length: %d", &content_length);
     }
 
-    // 找到body起始位置，并计算header长度
+    // 获取 body 起始位置
     char *body_start = strstr(buffer, "\r\n\r\n");
-    int header_len = 0;
-    if (body_start != NULL)
+    if (body_start == NULL)
     {
-        body_start += 4;
-        header_len = body_start - buffer;
+        fprintf(stderr, "错误：请求头不完整，缺少 CRLF 结束符\n");
+        send_error(client, "400 Bad Request", "请求头不完整");
+        return NULL;
     }
 
-    // body长度不足，则继续接收数据
+    body_start += 4;
+    int header_len = body_start - buffer;
     int body_received = total - header_len;
+
+    // 如果 body 不足，继续接收
     while (body_received < content_length && total < sizeof(buffer) - 1)
     {
         bytes = recv(client, buffer + total, sizeof(buffer) - total - 1, 0);
@@ -151,18 +181,15 @@ void *handle_client(void *client_socket)
         buffer[total] = '\0';
     }
 
-    // 请求体不完整，返回400错误
     if (body_received < content_length)
     {
-        printf("请求体不完整，拒绝转发\n");
-        send_error(client, "400 Bad Request");
-        close(client);
+        fprintf(stderr, "错误：请求体长度不足（已接收 %d 字节，预期 %d 字节）\n", body_received, content_length);
+        send_error(client, "400 Bad Request", "请求体长度不足");
         return NULL;
     }
 
+    // 进入转发逻辑
     printf("请求内容：\n%s\n", buffer);
-
-    // 转发请求到后端服务器
     forward_to_backend(client, buffer, total);
 
     close(client);
@@ -182,7 +209,7 @@ void handle_options_request(int client_sock)
         "Access-Control-Expose-Headers: Access-Control-Allow-Origin, Access-Control-Allow-Methods, Access-Control-Allow-Headers\r\n"
         "Access-Control-Max-Age: 86400\r\n"
         "\r\n"
-         "OPTIONS 方法已收到并已响应（此为课程设计模拟响应）\r\n";
+        "OPTIONS 方法已收到并已响应（此为课程设计模拟响应）\r\n";
 
     send(client_sock, response, strlen(response), 0);
 }
@@ -196,7 +223,7 @@ void handle_trace_request(int client_sock, const char *original_request, int tot
         "Access-Control-Allow-Origin: http://212.129.223.4:8080\r\n"
         "Access-Control-Allow-Credentials: true\r\n"
         "\r\n"
-         "TRACE 方法已收到并已响应（此为课程设计模拟响应）\r\n";
+        "TRACE 方法已收到并已响应（此为课程设计模拟响应）\r\n";
 
     // 先发送响应头
     send(client_sock, response_header, strlen(response_header), 0);
@@ -204,7 +231,6 @@ void handle_trace_request(int client_sock, const char *original_request, int tot
     // 然后原样回显客户端请求内容
     send(client_sock, original_request, total_len, 0);
 }
-
 
 void handle_connect_request(int client_sock)
 {
@@ -221,13 +247,45 @@ void handle_connect_request(int client_sock)
 }
 
 // HTTP错误响应函数，快速向客户端返回一个标准的HTTP错误响应
-void send_error(int s, const char *error_message)
+void send_error(int client_sock, const char *status_code, const char *message)
 {
+    // 设置 linger 确保响应发送完成
+    struct linger ling = {1, 2}; // on = 1, timeout = 2秒
+    setsockopt(client_sock, SOL_SOCKET, SO_LINGER, &ling, sizeof(ling));
+
+    // 构造响应
     char response[1024];
-    sprintf(response,
-            "HTTP/1.1 %s\r\nContent-Type:text/plain\r\n\r\nError: %s",
-            error_message, error_message);
-    send(s, response, strlen(response), 0);
+    snprintf(response, sizeof(response),
+             "HTTP/1.1 %s\r\n"
+             "Content-Type: text/plain\r\n"
+             "Content-Length: %ld\r\n"
+             "Access-Control-Allow-Origin: http://212.129.223.4:8080\r\n"
+             "Access-Control-Allow-Credentials: true\r\n"
+             "Connection: close\r\n"
+             "\r\n"
+             "错误：%s\r\n",
+             status_code, strlen(message) + 12, message);
+
+    // 发送响应
+    int sent = 0, len = strlen(response);
+    while (sent < len)
+    {
+        int n = send(client_sock, response + sent, len - sent, 0);
+        if (n <= 0)
+            break;
+        sent += n;
+    }
+
+    // 关闭写通道，告知客户端“我发完了”
+    shutdown(client_sock, SHUT_WR);
+
+    // 持续接收客户端残余数据，直到对方关闭（防止 TCP Reset）
+    char tmp[256];
+    while (recv(client_sock, tmp, sizeof(tmp), 0) > 0)
+    {
+    }
+
+    // 不再主动 close()，由 linger 控制释放
 }
 
 // 将前端网页发来的HTTP请求，重写后转发给Java后端服务器，并将响应再转发回前端浏览器
@@ -269,7 +327,7 @@ void forward_to_backend(int client_sock, const char *original_request, int total
     char method[8], path[1024];
     sscanf(original_request, "%s %s", method, path);
 
-    const char *first_line_end = strstr(original_request, "\r\n");  // 第一行结束
+    const char *first_line_end = strstr(original_request, "\r\n"); // 第一行结束
     if (!first_line_end)
     {
         send(client_sock, "HTTP/1.1 400 Bad Request\r\n\r\n", 28, 0);
@@ -353,7 +411,6 @@ void forward_to_backend(int client_sock, const char *original_request, int total
     new_len += body_len;
 
     printf("转发内容如下：\n%.*s\n", new_len, modified_request);
-    printf("-------------------------------------------------------------------------------");
 
     if (send(backend_sock, modified_request, new_len, 0) < 0)
     {
@@ -402,7 +459,7 @@ void forward_to_backend(int client_sock, const char *original_request, int total
                 int total_len = strlen(new_response);
                 send(client_sock, new_response, total_len, 0);
             }
-            else  // 原样中转
+            else // 原样中转
             {
                 send(client_sock, response_buffer, bytes, 0);
             }
